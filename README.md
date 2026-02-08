@@ -1,4 +1,4 @@
-# DAKU (Digital Aplikasi Kunjungan)
+# DAKU (Dataku Datamu)
 
 "Datamu Dataku, aplikasi survey."
 
