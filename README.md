@@ -2,7 +2,7 @@
 
 "Datamu Dataku, aplikasi survey."
 
-A web-based application for field report management (Laporan Kunjungan), designed for Account Officers (AO), Admins, and Management.
+A web-based application for field report management (Laporan Pengajuan), designed for Account Officers (AO), Admins, and Management.
 
 ## 🚀 Status
 - **Version**: 1.0 (Production Ready)
