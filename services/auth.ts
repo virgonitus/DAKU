@@ -2,9 +2,12 @@ import { supabase } from './supabase';
 import { User, Role } from '../types';
 
 export const authService = {
-    // Login with Username (mapped to email)
+    // Login with Username or Email
     async signIn(username: string, password: string): Promise<{ user: User | null; error: any }> {
-        const email = `${username}@daku.com`; // Map username to fake email
+        let email = username;
+        if (!email.includes('@')) {
+            email = `${username}@daku.com`;
+        }
 
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
             email,
