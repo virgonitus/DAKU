@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Role } from '../types';
 import { db } from '../services/db';
+import { supabase } from '../services/supabase';
 import { UserPlus, Save, Users, Edit, Plus, ArrowLeft, Settings, Trash2, List } from 'lucide-react';
 import { useModal } from '../context/ModalContext';
 
@@ -55,11 +56,22 @@ const UserManagement: React.FC<UserManagementProps> = ({ onCancel }) => {
 
   const loadData = async () => {
     setIsLoading(true);
-    const [u, b, a] = await Promise.all([
-      db.getUsers(),
-      db.getBranches(),
-      db.getAreas()
-    ]);
+    // Supabase Load
+    const { data: usersData } = await supabase.from('profiles').select('*');
+    const u = usersData?.map((p: any) => ({
+      id: p.id,
+      name: p.full_name,
+      role: p.role as Role,
+      branchCode: p.branch_code,
+      areaCode: p.area_code,
+      username: p.username
+    })) || [];
+
+    const { data: branchesData } = await supabase.from('branches').select('code');
+    const { data: areasData } = await supabase.from('areas').select('code');
+
+    const b = branchesData?.map((x: any) => x.code) || [];
+    const a = areasData?.map((x: any) => x.code) || [];
     setUsers(u);
     setAvailableBranches(b);
     setAvailableAreas(a);
@@ -111,33 +123,75 @@ const UserManagement: React.FC<UserManagementProps> = ({ onCancel }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!idSuffix || !name || !username || !password) {
-      showModal({ title: 'Gagal Menyimpan', message: 'Mohon lengkapi semua field terlebih dahulu.', type: 'warning' });
+    if (!name || !username) {
+      showModal({ title: 'Gagal Menyimpan', message: 'Mohon lengkapi Nama dan Username.', type: 'warning' });
       return;
     }
 
-    const userData: User = {
-      id: getFullId(),
-      name,
-      role,
-      branchCode,
-      areaCode,
-      username,
-      password
-    };
-
     setIsLoading(true);
-    if (isEditing) {
-      await db.updateUser(userData);
-      showModal({ title: 'Berhasil', message: 'Data user berhasil diperbarui!', type: 'success' });
-    } else {
-      // Check for duplicates if needed, but ID overwrites in this simple DB
-      await db.createUser(userData);
-      showModal({ title: 'Berhasil', message: 'User baru berhasil ditambahkan!', type: 'success' });
-    }
 
-    await loadData(); // Reload to get latest user list
-    setViewMode('LIST');
+    try {
+      if (isEditing) {
+        // Update Profile Only (Cannot change password or email via Client SDK for other users)
+        const { error } = await supabase.from('profiles').update({
+          full_name: name,
+          branch_code: branchCode,
+          area_code: areaCode,
+          username: username
+        }).eq('username', username); // Use username as key for now if ID is UUID
+
+        if (error) throw error;
+        showModal({ title: 'Berhasil', message: 'Data user berhasil diperbarui! (Password tidak berubah)', type: 'success' });
+
+      } else {
+        // Create New User (SignUp)
+        if (!password) {
+          showModal({ title: 'Gagal', message: 'Password wajib diisi untuk user baru.', type: 'warning' });
+          setIsLoading(false);
+          return;
+        }
+
+        const email = `${username}@daku.com`;
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              username,
+              full_name: name,
+              role,
+              branch_code: branchCode,
+              area_code: areaCode
+            }
+          }
+        });
+
+        if (authError) throw authError;
+
+        if (authData.user) {
+          // Manual Insert to Profile (in case Trigger missing)
+          const { error: profileError } = await supabase.from('profiles').insert({
+            id: authData.user.id,
+            username,
+            full_name: name,
+            role,
+            branch_code: branchCode,
+            area_code: areaCode
+          });
+          if (profileError) console.error("Profile insert warning:", profileError);
+        }
+
+        showModal({ title: 'Berhasil', message: 'User baru berhasil ditambahkan ke Supabase!', type: 'success' });
+      }
+
+      await loadData();
+      setViewMode('LIST');
+    } catch (err: any) {
+      console.error(err);
+      showModal({ title: 'Error', message: err.message || 'Terjadi kesalahan.', type: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // --- MASTER DATA HANDLERS ---
@@ -145,7 +199,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ onCancel }) => {
   const handleAddBranch = async () => {
     if (!newBranch) return;
     const code = newBranch.toUpperCase();
-    await db.addBranch(code);
+    const { error } = await supabase.from('branches').insert({ code });
+    if (error) {
+      showModal({ title: 'Gagal', message: error.message, type: 'error' });
+      return;
+    }
     setNewBranch('');
     // Ensure UI updates
     if (!availableBranches.includes(code)) {
@@ -160,10 +218,14 @@ const UserManagement: React.FC<UserManagementProps> = ({ onCancel }) => {
       type: 'confirm',
       confirmLabel: 'Hapus',
       onConfirm: async () => {
+        // Perform DB Deletion
+        const { error } = await supabase.from('branches').delete().eq('code', code);
+        if (error) {
+          showModal({ title: 'Gagal', message: error.message, type: 'error' });
+          return;
+        }
         // Optimistic UI Update: Remove immediately from screen
         setAvailableBranches(prev => prev.filter(b => b !== code));
-        // Perform DB Deletion
-        await db.deleteBranch(code);
       }
     });
   };
@@ -171,7 +233,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ onCancel }) => {
   const handleAddArea = async () => {
     if (!newArea) return;
     const code = newArea.toUpperCase();
-    await db.addArea(code);
+    const { error } = await supabase.from('areas').insert({ code });
+    if (error) {
+      showModal({ title: 'Gagal', message: error.message, type: 'error' });
+      return;
+    }
     setNewArea('');
     if (!availableAreas.includes(code)) {
       setAvailableAreas(prev => [...prev, code]);
@@ -185,46 +251,42 @@ const UserManagement: React.FC<UserManagementProps> = ({ onCancel }) => {
       type: 'confirm',
       confirmLabel: 'Hapus',
       onConfirm: async () => {
+        // Perform DB Deletion
+        const { error } = await supabase.from('areas').delete().eq('code', code);
+        if (error) {
+          showModal({ title: 'Gagal', message: error.message, type: 'error' });
+          return;
+        }
         // Optimistic UI Update
         setAvailableAreas(prev => prev.filter(a => a !== code));
-
-        // Perform DB Deletion
-        await db.deleteArea(code);
       }
     });
   };
 
   // --- DELETE USER HANDLER ---
   const handleDeleteUser = async (user: User) => {
-    // Prevent deleting ADMIN account
     if (user.role === 'ADMIN') {
-      showModal({
-        title: 'Tidak Diizinkan',
-        message: 'Akun Administrator tidak dapat dihapus.',
-        type: 'warning'
-      });
+      showModal({ title: 'Tidak Diizinkan', message: 'Akun Administrator tidak dapat dihapus.', type: 'warning' });
       return;
     }
 
     showModal({
       title: 'Hapus User?',
-      message: `Apakah Anda yakin ingin menghapus user "${user.name}" (${user.id})? Tindakan ini tidak dapat dibatalkan.`,
+      message: `Apakah Anda yakin ingin menghapus user "${user.name}"? User tidak akan bisa login lagi.`,
       type: 'confirm',
       confirmLabel: 'Hapus',
       onConfirm: async () => {
-        // Optimistic UI Update
-        setUsers(prev => prev.filter(u => u.id !== user.id));
-        // Perform DB Deletion
-        await db.deleteUser(user.id);
+        // Delete from Profiles (Effective Ban)
+        // Note: Auth User remains but cannot login if app checks profile.
+        const { error } = await supabase.from('profiles').delete().eq('id', user.id);
 
-        // Delay success modal to allow current modal to close first
-        setTimeout(() => {
-          showModal({
-            title: 'Berhasil',
-            message: `User "${user.name}" berhasil dihapus.`,
-            type: 'success'
-          });
-        }, 100);
+        if (error) {
+          showModal({ title: 'Gagal', message: error.message, type: 'error' });
+          return;
+        }
+
+        setUsers(prev => prev.filter(u => u.id !== user.id));
+        showModal({ title: 'Berhasil', message: 'User berhasil dihapus.', type: 'success' });
       }
     });
   };
