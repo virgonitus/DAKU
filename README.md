@@ -1,5 +1,7 @@
 # DAKU (Digital Aplikasi Kunjungan)
 
+"Datamu Dataku, aplikasi survey."
+
 A web-based application for field report management (Laporan Kunjungan), designed for Account Officers (AO), Admins, and Management.
 
 ## 🚀 Status
