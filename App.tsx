@@ -13,6 +13,8 @@ import { useModal } from './context/ModalContext';
 import cupsLogo from './src/assets/logodoku.png';
 import EmbedPDF from '@embedpdf/snippet';
 import LoadingScreen from './components/LoadingScreen';
+import { authService } from './services/auth';
+import { supabase } from './services/supabase';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -24,34 +26,37 @@ export default function App() {
   const { showModal, closeModal } = useModal();
 
 
-  // Load user from sessionStorage on mount
+  // Check Supabase Session
   useEffect(() => {
-    const savedUser = sessionStorage.getItem('session_user');
-    const savedView = sessionStorage.getItem('session_view');
-
-    if (savedUser) {
-      try {
-        const parsedUser = JSON.parse(savedUser);
-        setUser(parsedUser);
-
-        // Restore view if saved
-        if (savedView && (savedView === 'DASHBOARD' || savedView === 'CREATE' || savedView === 'EDIT' || savedView === 'REVIEW' || savedView === 'USER_MGMT')) {
+    const checkSession = async () => {
+      const user = await authService.getCurrentUser();
+      if (user) {
+        setUser(user);
+        const savedView = sessionStorage.getItem('session_view');
+        if (savedView && ['DASHBOARD', 'CREATE', 'EDIT', 'REVIEW', 'USER_MGMT'].includes(savedView)) {
           setView(savedView as any);
         } else {
           setView('DASHBOARD');
         }
-      } catch (e) {
-        console.error('Failed to restore session', e);
-        sessionStorage.removeItem('session_user');
-        sessionStorage.removeItem('session_view');
       }
-    }
-
-    // Add a small delay to ensure smooth transition and prevent flash
-    setTimeout(() => {
       setIsCheckingSession(false);
-    }, 800);
-  }, []); // Run once on mount
+    };
+
+    checkSession();
+
+    // Listen for Auth Changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        const user = await authService.getCurrentUser();
+        setUser(user);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setView('LOGIN');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Save view to sessionStorage whenever it changes
   useEffect(() => {
@@ -324,23 +329,28 @@ export default function App() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const u = await db.login(loginUser, loginPass);
+    const { user: u, error } = await authService.signIn(loginUser, loginPass);
     setLoading(false);
+
     if (u) {
       setUser(u);
-      sessionStorage.setItem('session_user', JSON.stringify(u)); // Persist session
       setView('DASHBOARD');
       setLoginUser('');
       setLoginPass('');
     } else {
-      showModal({ title: 'Login Gagal', message: 'Username atau password salah. Silakan coba lagi.', type: 'error' });
+      showModal({
+        title: 'Login Gagal',
+        message: error?.message || 'Username atau password salah.',
+        type: 'error'
+      });
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await authService.signOut();
     setUser(null);
     setView('LOGIN');
-    sessionStorage.removeItem('session_user');
+    sessionStorage.removeItem('session_view');
     setSelectedReport(null);
   };
 
