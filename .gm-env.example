@@ -1,0 +1,7 @@
+# App Configuration
+VITE_APP_TITLE=DAKU
+VITE_APP_VERSION=1.0.0
+
+# Future Database Configuration (Supabase/Firebase)
+# VITE_SUPABASE_URL=https://your-project.supabase.co
+# VITE_SUPABASE_ANON_KEY=your-anon-key

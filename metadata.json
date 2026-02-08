@@ -1,0 +1,5 @@
+{
+  "name": "Field Analysis Report Generator",
+  "description": "A web application to input field survey data, manage photos, and export a formatted PDF report similar to the reference provided.",
+  "requestFramePermissions": []
+}
